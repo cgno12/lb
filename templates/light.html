@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+	<meta name="viewport" content="initial-scale=1.0, user-scalable=no" />
+	<title>Lightning Detection System</title>
+	<link type="text/css" rel="stylesheet" href="/static/css/bdmapStyle.css">
+	<script type="text/javascript" src="/static/DatePicker/WdatePicker.js"></script>
+	<script type="text/javascript" src="/static/js/jquery.min.js"></script>
+	<script type="text/javascript" src="http://api.map.baidu.com/api?v=3.0&ak=2COzFaICuIyVj7V3VetKfmdRVnX8BhVr"></script>
+	<script type="text/javascript" src="http://api.map.baidu.com/api?v=2.0&ak=2COzFaICuIyVj7V3VetKfmdRVnX8BhVr"></script>
+	<script type="text/javascript" src="/static/offlinemap/map_load.js"></script>
+	<style type="text/css">
+		body, html{width: 100%;height: 100%;margin:0;font-family:"微软雅黑";}
+		#allmap{height:100%;width:100%;}
+		#r-result{width:100%;}
+	</style>
+	<script>
+		var 		bPlay = false;
+		var			BmapPtL = [];				//散点绘图数据
+		var         BmapCl = [];
+		var 		CLlines = [];
+		var         AnimationPtL = [];
+		var			realInterval = null;
+		var			hisInterval = null;
+		var			realCurM = null;
+		var 		Reg = "(?<=\").*?(?=\")";
+		var			rangeStep = 3;
+		var			curRadarImg = null;
+		var			cllineLay = null;
+		var			postionLay = null;
+
+		window.onload = function() {
+			initGlobal();			
+			initMap();
+			readCookies();
+			initCtrl();
+
+			map.addEventListener("mousemove",function(e){
+				$('#input-pos').val(e.point.lng + " , " + e.point.lat);
+			});
+			lightLay = new customlay(BmapPtL, drawHeatMap);
+			map.addOverlay(lightLay);
+
+			clusterlay = new customlay(BmapCl, drawCluster);
+			//map.addOverlay(clusterlay);
+
+			predictlay = new customlay(BmapCl, DrawPredict);
+			map.addOverlay(predictlay);
+
+			cllineLay = new customlay(CLlines, drawClusterline);
+			map.addOverlay(cllineLay);
+
+			postionLay = new customlay(null, DrawPostion);
+			if (postionShow)
+				map.addOverlay(postionLay);
+
+			animationlay = new customlay(AnimationPtL, drawAnimation);
+			map.addOverlay(animationlay);
+
+			radarLay = new customlay(curRadarImg, DrawRadar);
+			map.addOverlay(radarLay);
+
+			alarmLay = new customlay(BmapPtL, DrawAlarm);
+			if (alarm)
+				map.addOverlay(alarmLay);
+			else
+				map.removeOverlay(alarmLay);
+
+			$('#input-date').val("");
+
+			TypeClick();
+		}
+
+		function newCenter()
+		{
+			var pt = map.getCenter();
+			$('#input-lng').val(pt.lng);
+			$('#input-lat').val(pt.lat);
+
+			// if (!alarm)
+			// {
+			// 	$('#input-alarmlng').val(pt.lng);
+			// 	$('#input-alarmlat').val(pt.lat);
+			// }
+		}
+
+		function initMap()
+		{
+			map = new BMap.Map('allmap');
+			map.enableScrollWheelZoom();
+			map.enableContinuousZoom(); 
+			map.disableDoubleClickZoom();
+			map.setMaxZoom(11);
+			map.setMinZoom(6);
+			//setMapStyle();
+			
+			map.addEventListener("mousemove",function(e){
+				$('#input-pos').val(e.point.lng + " , " + e.point.lat);
+			});
+
+			map.addEventListener("dragend",function(e){
+				newCenter();
+			});
+
+			map.addEventListener("dragging",function(e){
+				newCenter();
+			});
+
+			map.addEventListener("zoomend",function(e){
+				newCenter();
+			});
+
+			map.addEventListener("dblclick",function(e){
+				if (bPlay) return;
+				for (var i = 0; i < BmapCl.length; i ++)
+				{
+					var cl = BmapCl[i];
+					var r = parseFloat(cl.border)*1000;
+					var p = new BMap.Point(cl.lng, cl.lat);
+					var dis = map.getDistance(p, e.point);
+					if (dis < r)
+					{
+						clusterID = cl.cluster;
+						renderLinght();
+						break ;
+					}	
+				}
+			})
+		}
+
+		function TypeClick()
+		{
+			ptL = [];
+			clusterL = [];
+			BmapPtL = [];
+			BmapCl = [];
+			clusterID= null;
+			switch (dataModel)
+			{
+				case DataModel.real:
+					window.clearInterval(realInterval);
+					map.removeOverlay(predictlay);
+					break;
+
+				case DataModel.his:
+					stopPlay();
+					bPlay = false;
+					hisDate = null;
+					map.removeOverlay(clusterlay);
+					$('#input-range-play').val(0);
+					break;
+			}
+
+			dataModel = parseInt((dataModel + 1) % 2);
+
+			var timectrl = document.getElementById("div-timectrl");
+			switch (dataModel)
+			{
+				case DataModel.real:
+					$('#bt-type').html("实时");
+					timectrl.style.display = "none";
+					map.addOverlay(predictlay);
+					realInterval = window.setInterval(showReal, 1000);
+					break;
+
+				case DataModel.his:
+					$('#bt-type').html("历史");
+					timectrl.style.display = "inline";
+					map.addOverlay(clusterlay);
+					break;
+			}
+			renderLinght();
+		}
+
+	function renderLinght()
+	{
+		
+		switch (parseInt(showModel))
+		{
+			case ShowModel.heat:
+				lightLay.render$1(drawHeatMap, BmapPtL);
+				break;
+
+			case ShowModel.pt:
+				lightLay.render$1(DrawLinghtPt, BmapPtL);
+				break;
+
+			case ShowModel.yord:
+				lightLay.render$1(DrawYorD, BmapPtL);
+				break;
+		}
+		if (postionShow)
+			postionLay.render$1(DrawPostion, null);
+
+		if (dataModel == DataModel.real)
+			predictlay.render$1(DrawPredict, BmapCl);
+
+		if (dataModel == DataModel.his)	
+		{
+			cllineLay.render$1(drawClusterline, CLlines);
+			clusterlay.render$1(drawCluster, BmapCl);
+			var select = false;
+			for (var i = 0; i < BmapCl.length; i ++)
+			{
+				if (BmapCl[i].cluster == clusterID)
+				{
+					showClusterfun(BmapCl[i]);
+					select = true;
+					break;
+				}
+			}
+
+			if (select)
+				document.getElementById("div-cluster").style.zIndex= 9999;
+			else
+				document.getElementById("div-cluster").style.zIndex= -9999;
+		}
+
+		if (dataModel == DataModel.real)
+			animationlay.render$1(drawAnimation, AnimationPtL);
+			
+		if (showRadar)
+		{
+			console.log("img len %d", radarimg.length);
+			var timeS = Math.floor(parseInt($('#input-range-play').val()) / 6);
+			curRadarImg = radarimg[timeS];
+			console.log(curRadarImg);
+			radarLay.render$1(DrawRadar, curRadarImg);
+		}
+	}
+
+	function onBtPlayClick()
+	{
+		var date = $('#input-date').val();
+		if (date == "")
+			return;
+
+		bPlay = !bPlay;
+		if (bPlay)
+			onPlay();
+		else
+			stopPlay();
+	}
+
+	</script>
+</head>
+<body>		
+	<div id="div-mapimg"  onclick="onBtSetClick(1)">
+		<img class="img-btn" id="live-sound-img" src="/static/img/position_black.png">
+		</img>
+	</div>
+	<div id="div-alermimg" onclick="onBtSetClick(4)">
+		<img class="img-btn" id="live-alerm-img" src="/static/img/speaker_black.png">
+		</img>
+	</div>
+	<div id="div-stationimg" onclick="onBtSetClick(3)">
+		<img class="img-btn" id="live-alerm-img" src="/static/img/station_black.png">
+		</img>
+	</div>
+	<div id="div-settingimg" onclick="onBtSetClick(2)">
+		<img class="img-btn" id="live-alerm-img" src="/static/img/gear.png">
+		</img>
+	</div>
+
+	<!-- <section class="section-pannel" id="section-pannel"> -->
+        <div class="div-pop" id="div-mapsetting">
+            <h2>地图</h2>
+            <HR style="FILTER: alpha(opacity=100,finishopacity=0,style=3)" width="98%" color=#987cb9 SIZE=3>
+			<div class="div-div-pop">
+				<span class="span1">缩&nbsp&nbsp放</span>
+				<div class="div-img" onclick="onClickZoom()">
+					<img class="img-setting-btn" id="img-zoom" src="/static/img/开关1.png">
+					</img>
+				</div>
+			</div>			
+			<br />
+			<span class="span2">鼠标滚轮缩放地图</span>
+			<br />
+			<div class="div-div-pop">
+				<span class="span1">拖&nbsp&nbsp拽</span>
+				<div class="div-img" onclick="onClickDrag()">
+					<img class="img-setting-btn" id="img-drag" src="/static/img/开关1.png">
+					</img>
+				</div>
+			</div>
+			<br />
+			<span class="span2">按下鼠标左键拖拽</span>
+			<br />
+			<div class="div-div-pop">
+				<span class="span1">中心坐标</span>
+			</div>
+			<br />
+			<div class="div-div-pop">
+				<span class="span-input">经度</span>
+				<input type="number" id="input-lng">
+			</div>
+			<br />
+			<div class="div-div-pop">
+				<span class="span-input">纬度</span>
+				<input type="number" id="input-lat">
+			</div>
+			<br />
+			<div class="div-div-pop">
+				<button type="button" id="bt-ok" onclick="onClickBtOK()">确定</button>
+			</div>
+			<br />
+			<div class="div-div-pop">
+				<span class="span1">自定义地图</span>
+			</div>
+			<br />
+			<div class="div-div-pop">
+				<span class="span-input">地图</span>
+				<input type="text" id="input-map">
+			</div>
+			<br />
+		</div>
+		
+		<div class="div-pop" id="div-layersetting">
+            <h2>显示</h2>
+            <HR style="FILTER: alpha(opacity=100,finishopacity=0,style=3)" width="98%" color=#987cb9 SIZE=3>
+			<div class="div-div-pop">
+				<span class="span1">雷&nbsp&nbsp达</span>
+				<div class="div-img" onclick="onClickRadar()">
+					<img class="img-setting-btn" id="img-radar" src="/static/img/开关1.png">
+					</img>
+				</div>
+			</div>			
+			<br />
+			<span class="span2">叠加天气雷达图</span>
+			<br />
+			<div class="div-div-pop">
+				<span class="span1">云&nbsp&nbsp图</span>
+				<div class="div-img" onclick="onClickCloud()">
+					<img class="img-setting-btn" id="live-sound-img" src="/static/img/开关2.png">
+					</img>
+				</div>
+			</div>
+			<br />
+			<span class="span2">叠加卫星云图</span>
+			<br />
+			<div class="div-div-pop">
+				<span class="span1">航&nbsp&nbsp线</span>
+				<div class="div-img" onclick="onClickPath()">
+					<img class="img-setting-btn" id="img-path" src="/static/img/开关2.png">
+					</img>
+				</div>
+			</div>
+			<br />
+			<span class="span2">显示航线</span>
+			<br />
+			<div class="div-div-pop">
+				<span class="span1">区&nbsp&nbsp域</span>
+				<div class="div-img" onclick="onClickArea()">
+					<img class="img-setting-btn" id="img-area" src="/static/img/开关2.png">
+					</img>
+				</div>
+			</div>
+			<br />
+			<span class="span2">管制区域</span>
+			<br />
+			<div class="div-div-pop">
+				<span class="span1">机&nbsp&nbsp场</span>
+				<div class="div-img" onclick="onClickAirport()">
+					<img class="img-setting-btn" id="img-airport" src="/static/img/开关2.png">
+					</img>
+				</div>
+			</div>
+			<br />
+			<span class="span2">显示国内主要机场</span>
+			<br />
+			<div class="div-div-pop">
+				<span class="span1">雷暴核</span>
+				<div class="div-img" onclick="onClickCluster()">
+					<img class="img-setting-btn" id="img-cluster" src="/static/img/开关1.png">
+					</img>
+				</div>
+			</div>			
+			<br />
+			<span class="span2">显示雷暴核</span>
+			<br />
+
+			<div class="div-div-pop">
+				<span class="span1">方位图</span>
+				<div class="div-img" onclick="onClickPostion()">
+					<img class="img-setting-btn" id="img-postion" src="/static/img/开关1.png">
+					</img>
+				</div>
+			</div>			
+			<br />
+			<span class="span2">显示方位图</span>
+			<br />
+
+			<div class="div-div-pop">
+				<span class="span1">闪&nbsp&nbsp电</span>
+			</div>
+			<br />
+			<div class="div-div-pop">
+				<span class="span-input">显示方式</span>
+				<select id="select-showmodel" onchange="onshowModelChange()">
+					<option value ="1">密度图</option>
+					<option value ="2">散点</option>
+					<option value="3">云/地闪</option>
+				</select>
+			</div>
+			<br />
+			<div class="div-div-pop">
+				<span class="span-input">累计时长</span>
+				<select id="select-time" onchange="ontimeChange()">
+					<option value ="10"> 10 分钟 </option>
+					<option value ="20">20 分钟</option>
+					<option value="30">30 分钟</option>
+					<option value="60">1 小时</option>
+					<option value="120">2 小时</option>
+					<option value="1440">24 小时</option>
+				</select>
+			</div>
+			<br />
+		</div>
+
+		<div class="div-pop" id="div-sitesetting">
+			<h2>站点</h2>
+			<HR style="FILTER: alpha(opacity=100,finishopacity=0,style=3)" width="98%" color=#987cb9 SIZE=3>
+			<div class="div-div-pop">
+				<span class="span1">站&nbsp&nbsp点</span>
+				<div class="div-img" onclick="onClickStation()">
+					<img class="img-setting-btn" id="img-station" src="/static/img/开关1.png">
+					</img>
+				</div>
+			</div>			
+			<br />
+			<span class="span2">雷电监测站点</span>
+			<br />
+
+			<div class="div-div-pop">
+					<span class="span1">监&nbsp&nbsp测</span>
+					<div class="div-img">
+						<img class="img-setting-btn" id="live-sound-img" src="/static/img/开关1.png">
+						</img>
+					</div>
+				</div>			
+				<br />
+				<span class="span2">闪电定位站点</span>
+				<br />
+		</div>
+
+		<div class="div-pop" id="div-alarmsetting">
+			<h2>告警</h2>
+			<HR style="FILTER: alpha(opacity=100,finishopacity=0,style=3)" width="98%" color=#987cb9 SIZE=3>
+			<div class="div-div-pop">
+				<span class="span1">告&nbsp&nbsp警</span>
+				<div class="div-img" onclick="onClickAlarm()">
+					<img class="img-setting-btn" id="img-alarm" src="/static/img/开关1.png">
+					</img>
+				</div>
+			</div>			
+			<br />
+			<span class="span2">雷电监测告警</span>
+			<br />
+
+			<div class="div-div-pop">
+				<span class="span1">区&nbsp&nbsp域</span>
+				<!-- <div class="div-img">
+					<img class="img-setting-btn" id="live-sound-img" src="/static/img/开关1.png">
+					</img>
+				</div> -->
+			</div>			
+			<br />
+			<span class="span2">雷电监测区域</span>
+			<br />
+			<div class="div-div-pop">
+				<span class="span-input">经度</span>
+				<input type="number" id="input-alarmlng" style="IME-MODE: disabled; WIDTH: 110px; HEIGHT: 25px" >
+			</div>
+			<br />
+			<div class="div-div-pop">
+				<span class="span-input">纬度</span>
+				<input type="number" id="input-alarmlat" style="IME-MODE: disabled; WIDTH: 110px; HEIGHT: 25px" >
+			</div>
+			<br />
+			<div class="div-div-pop">
+				<span class="span-input">半径(KM)</span>
+				<input id="select-alarmR" style="IME-MODE: disabled; WIDTH: 60px; HEIGHT: 25px" onkeyup="this.value=this.value.replace(/\D/g,'')"onafterpaste="this.value=this.value.replace(/\D/g,'')" maxlength="5" size="14" name="amount" type="text" />
+				<!-- <select id="select-alarmR">
+					<option value ="10"> 10 KM </option>
+					<option value ="20"> 20 KM </option>
+					<option value ="40"> 40 KM </option>
+					<option value ="60"> 60 KM </option>
+					<option value ="80"> 80 KM </option>
+					<option value ="100"> 100 KM </option>
+					<option value ="200"> 200 KM</option>
+					<option value ="300"> 300 KM</option>
+					<option value ="400"> 400 KM</option>
+					<option value ="500"> 500 KM</option>
+				</select> -->
+			</div>
+			<br />
+			<div class="div-div-pop">
+				<button type="button" id="bt-ok" onclick="onClickBtAlarm()">确定</button>
+			</div>
+	
+		</div>
+
+		<div id="div-cluster">
+			<h2>雷暴核</h2>
+			<HR style="FILTER: alpha(opacity=100,finishopacity=0,style=3)" width="98%" color=#987cb9 SIZE=3>
+			<div class="div-div-pop">
+				<span class="span1">经&nbsp&nbsp度</span>
+				<span id="span-lng"></span>
+			</div>			
+			<br />
+			<div class="div-div-pop">
+				<span class="span1">纬&nbsp&nbsp度</span>
+				<span id="span-lat"></span>
+			</div>			
+			<br />
+			<div class="div-div-pop">
+				<span class="span1">频&nbsp次(次)</span>
+				<span id="span-times"></span>
+			</div>			
+			<br />
+			<div class="div-div-pop">
+				<span class="span1">半径(KM)</span>
+				<span id="span-radius"></span>
+			</div>			
+			<br />	
+		</div>
+		
+	<section id="allmap"></section>
+	<section id="section-infobar">
+		<div id="div-type">
+			<button type="button" id="bt-type" onclick="TypeClick();">实时</button>
+		</div>
+		<div id="div-timectrl">
+			<input id="input-date" class="Wdate" onclick="WdatePicker({isShowClear:false,dateFmt:'yyyy-MM-dd',maxDate:'%y-%M-#{%d}'})" />
+			<button type="button" id="bt-play" onclick="onBtPlayClick();">播放</button>
+			<input id="input-range-play" type="range" min="0" max="1440" value="0" onchange="onRangeChange();"\/>
+		</div>
+		<div id="div-timenow">
+			<span id="span-time-now">2019-04-19 11:11:11 utc+8</span>
+		</div>
+    </section>
+    <div id="div-colortips">
+        <div class="div-div-colortips">
+            <label id="lab-yunshan">云闪</label>
+            <input id="input-yunshan" type="color" onchange="onColorChange(1)">
+        </div>      
+		<div class="div-div-colortips">
+            <label id="lab-dishan">地闪</label>
+            <input id="input-dishan" type="color" onchange="onColorChange(0)">
+        </div>		
+	</div>
+	<div id="div-ptcolortips">
+        <div class="div-div-ptcolortips">
+            <label id="lab-ptcolor1">1</label>
+            <input id="input-ptclolor1" type="color" onchange="onPtColorChange(0)">
+        </div>      
+		<div class="div-div-ptcolortips">
+            <label id="lab-ptcolor2">2</label>
+            <input id="input-ptclolor2" type="color" onchange="onPtColorChange(1)">
+		</div>
+		<div class="div-div-ptcolortips">
+            <label id="lab-ptcolor3">3</label>
+            <input id="input-ptclolor3" type="color" onchange="onPtColorChange(2)">
+		</div>	
+		<div class="div-div-ptcolortips">
+            <label id="lab-ptcolor4">4</label>
+            <input id="input-ptclolor4" type="color" onchange="onPtColorChange(3)">
+		</div>	
+		<div class="div-div-ptcolortips">
+            <label id="lab-ptcolor5">5</label>
+            <input id="input-ptclolor5" type="color" onchange="onPtColorChange(4)">
+		</div>
+		<!-- <div class="div-div-ptcolortips">
+            <label id="lab-ptcolor6">6</label>
+            <input id="input-ptclolor6" type="color" onchange="onPtColorChange(5)">
+		</div>
+		<div class="div-div-ptcolortips">
+            <label id="lab-ptcolor7">7</label>
+            <input id="input-ptclolor7" type="color" onchange="onPtColorChange(6)">
+		</div>
+		<div class="div-div-ptcolortips">
+            <label id="lab-ptcolor8">8</label>
+            <input id="input-ptclolor8" type="color" onchange="onPtColorChange(7)">
+        </div>				 -->
+    </div>
+    <div id="div-lnglat">
+        <input id="input-pos" type="text" readonly disabled="disabled">
+    </div>
+	<audio src='/static/alarm.wav' style='display:none' id='audio'></audio>
+</body>
+</html>
+<script type="text/javascript" src="/static/js/global.js?v=2019090303"></script>
+<script type="text/javascript" src="/static/js/light.js?v=20190903"></script>
+<script type="text/javascript" src="/static/js/customlay.js?v=20190903"></script>
+<script type="text/javascript" src="/static/js/pointlay.js?v=20190903"></script>
+<script type="text/javascript" src="/static/js/clusterlay.js?v=20190903"></script>
+<script type="text/javascript" src="/static/js/heatmap.js?v=20190903"></script>
+<script type="text/javascript" src="/static/js/yordlay.js?v=20190903"></script>
+<script type="text/javascript" src="/static/js/alarmlay.js?v=20190903"></script>
+<script type="text/javascript" src="/static/js/animation.js?v=20190903"></script>
+<script type="text/javascript" src="/static/js/radarlay.js?v=20190903"></script>
+<script type="text/javascript" src="/static/js/Predict.js?v=20190903"></script>
+<script type="text/javascript" src="/static/js/clusterlinelay.js?v=20190903"></script>
+<script type="text/javascript" src="/static/js/postionlay.js?v=20190903"></script>
+<script type="text/javascript">
+	
+    var 		showSetting = false;  
+	var			hisDate;
+	var			clusterID = null;
+
+	function onClickRadar()
+	{
+		showRadar = !showRadar;
+		switchPng("img-radar", showRadar);
+		if (showRadar)
+			getRadarImg();
+		else
+			curRadarImg = null;
+	}
+	
+	function onClickDrag()
+    {
+        mapDrag = !mapDrag;        
+        switchPng("img-drag", mapDrag);
+        if (mapDrag)
+            map.enableDragging();
+        else
+            map.disableDragging();
+        setCookie("mapDrag", mapDrag);
+    }
+	
+	function onshowModelChange()
+	{
+		var obj=document.getElementById('select-showmodel');
+		var index=obj.selectedIndex;
+		var val = obj.options[index].value;
+		if (showModel == ShowModel.pt)
+			document.getElementById("div-ptcolortips").style.zIndex= -9999;
+		else if (showModel == ShowModel.yord)
+			document.getElementById("div-colortips").style.zIndex= -9999;
+			
+		showModel = parseInt(val);
+
+		if (showModel == ShowModel.pt)
+			document.getElementById("div-ptcolortips").style.zIndex= 9999;
+		else if (showModel == ShowModel.yord)
+			document.getElementById("div-colortips").style.zIndex= 9999;
+		setCookie("showModel", showModel);	
+		renderLinght();
+	}
+
+	function ontimeChange()
+	{
+		var obj=document.getElementById('select-time');
+		var index=obj.selectedIndex;
+		stepTime = parseInt(obj.options[index].value);
+		var stepd = stepTime / 5;
+		for (var i = 0; i < 5; i ++)
+		{
+			var lab = stepd*i + " - " + (stepd*(i+1));
+			$('#lab-ptcolor' + (i+1)).html(lab);
+		}
+
+		setCookie("stepTime", stepTime);
+		renderLinght();
+	}
+
+	function onPtColorChange(index)
+	{
+		var  name = '#input-ptclolor' + (index + 1);
+		var color = $(name).val();
+		ptColor[index] = color;
+		name = "ptColor" + index;
+		setCookie(name, color);
+		renderLinght();
+	}
+
+	function onColorChange(index)
+	{
+		if (index == 0)
+		{
+			dishanColor = $('#input-dishan').val();
+			setCookie("dishanColor", dishanColor);
+		}
+
+		if (index == 1)
+		{
+			yunshanColor = $('#input-yunshan').val();
+			setCookie("yunshanColor", yunshanColor);
+		}
+		renderLinght();
+	}
+
+	function onRangeChange()
+	{
+		var curtime = Math.floor($('#input-range-play').val());	
+		var ss = $('#input-date').val() + ' ' + Math.floor(curtime / 60) +' : ' + Math.floor(curtime % 60);		
+		$('#span-time-now').html(ss);
+		hisPlay();
+	}
+
+	function setMapStyle()
+	{
+		$.ajax({
+			type: "get",
+			url: "/static/mapstyle.json",
+			dataType: "json",
+			async: false,
+			success: function(data){
+				map.setMapStyleV2({styleJson:data});
+			}
+		});
+	}
+
+	function onBtSetClick(index)
+	{
+		showSetting = !showSetting;
+		document.getElementById("div-mapsetting").style.zIndex= 0;
+		document.getElementById("div-layersetting").style.zIndex= 0;
+		document.getElementById("div-sitesetting").style.zIndex= 0;
+		document.getElementById("div-alarmsetting").style.zIndex= 0;
+
+		if (!showSetting) return;
+
+		switch (index)
+		{
+		case 1:
+			document.getElementById("div-mapsetting").style.zIndex= 9999;
+			break;
+
+		case 2:
+			document.getElementById("div-layersetting").style.zIndex= 9999;
+			break;
+
+		case 3:
+			document.getElementById("div-sitesetting").style.zIndex= 9999;
+			break;
+
+		case 4:
+			document.getElementById("div-alarmsetting").style.zIndex= 9999;
+			break;
+		}
+	}
+
+
+	function onClickStation()
+    {
+        stationShow = !stationShow;        
+        switchPng("img-station", stationShow);
+		setCookie("stationShow", stationShow);
+        if (stationShow)
+            showStation();
+        else
+            clearOverlay(stationLay);
+    }
+
+	function onClickAirport()
+	{
+		airportShow = !airportShow;        
+        switchPng("img-airport", airportShow);
+		setCookie("airportShow", airportShow);
+        if (airportShow)
+			showAirport();
+        else
+            clearOverlay(airportLay);
+	}
+
+	function onClickPath()
+    {
+        pathShow = !pathShow;        
+        switchPng("img-path", pathShow);
+		setCookie("pathShow", pathShow);
+        if (pathShow)
+            showPath();
+        else
+            clearOverlay(pathLay);
+    }
+
+	function onClickArea()
+    {
+        areaShow = !areaShow;        
+        switchPng("img-area", areaShow);
+		setCookie("areaShow", areaShow);
+        if (areaShow)
+            showArea();
+        else
+            clearOverlay(areaLay);
+    }
+
+	function onClickZoom()
+    {
+        mapZoom = !mapZoom;
+        switchPng("img-zoom", mapZoom);
+        if (mapZoom)
+            map.enableScrollWheelZoom();
+        else
+            map.disableScrollWheelZoom();
+        setCookie("mapZoom", mapZoom);
+		
+	}
+	
+	function onClickPostion()
+	{
+		postionShow = !postionShow;
+		switchPng("img-postion", postionShow);
+		if (postionShow)
+			map.addOverlay(postionLay);
+		else
+			map.removeOverlay(postionLay);
+		setCookie("postionShow", postionShow);
+	}
+
+	function onClickCluster()
+	{
+		showCluster = !showCluster;
+
+		switchPng("img-cluster", showCluster);
+		clusterID = null;
+		if (showCluster)
+			map.addOverlay(clusterlay)
+		else
+		{
+			map.removeOverlay(clusterlay);
+			document.getElementById("div-cluster").style.zIndex= -9999;
+		}
+			
+		renderLinght();
+		setCookie("showCluster", showCluster);
+	}
+
+	function onClickAlarm()
+	{
+		alarm = !alarm;
+		switchPng("img-alarm", alarm);
+		if (alarm)
+			map.addOverlay(alarmLay)
+		else
+			map.removeOverlay(alarmLay);
+	
+		setCookie("alarm", alarm);
+	}
+
+    function onClickBtOK()
+    {
+        centerPt.lng = $('#input-lng').val();
+        centerPt.lat = $('#input-lat').val();
+        map.setCenter(centerPt);
+        setCookie("centerLng", centerPt.lng);
+        setCookie("centerLat", centerPt.lat);
+		setCookie("zoom", map.getZoom());
+		postionLay.render$1(DrawPostion, null);
+    }
+
+	function onClickBtAlarm()
+	{
+		var val =  parseInt($('#select-alarmR').val());
+		if (val < 5 || val > 500)
+		{
+			alert("半径输入范围 5 - 500");
+			$('#select-alarmR').val(alarmR);
+			return ;
+		}
+		
+		alarmPt.lng = $('#input-alarmlng').val();
+        alarmPt.lat = $('#input-alarmlat').val();
+        setCookie("alarmLng", alarmPt.lng);
+        setCookie("alarmLat", alarmPt.lat);
+		//var obj=document.getElementById('select-alarmR');
+		//var index=obj.selectedIndex;
+		alarmR = parseInt($('#select-alarmR').val());
+		setCookie("alarmR", alarmR);
+		alert("告警区域设置成功！");
+		alarm = true;
+		switchPng("img-alarm", alarm);
+		if (alarm)
+			map.addOverlay(alarmLay)
+		else
+			map.removeOverlay(alarmLay);
+		setCookie("alarm", alarm);		
+	}
+
+	function showClusterfun(cl)
+	{
+		$('#span-lng').html(cl.lng);
+		$('#span-lat').html(cl.lat);
+		$('#span-times').html(cl.times);
+		$('#span-radius').html(cl.border);
+	}
+
+</script>
+		
+

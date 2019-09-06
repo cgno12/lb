@@ -1,0 +1,71 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <link href="https://cdn.bootcss.com/twitter-bootstrap/4.3.1/css/bootstrap.min.css" rel="stylesheet">
+    <link type="text/css" rel="stylesheet" href="/static/css/login.css">
+    <title>登录</title>
+  </head>
+  <body>
+    <div class="logo-div" >
+      <span class="title-span">实时雷电监测预警系统</span>
+    </div>
+    <div class="container">
+            
+            <div class="col">
+              
+              <form class="form-login" action="/login/" method="post">
+                {% if message %}
+                  <div class="alert alert-warning">{{ message }}</div>
+                {% endif %}
+                {% csrf_token %}
+                <h3 class="text-center" style="color: rgb(53, 230, 236)">欢迎登录</h3>
+                <div class="form-group">
+                  <label for="id_username">用户名：</label>
+                  <input type="text" name='username' class="form-control" id="id_username" placeholder="Username" autofocus required>
+                </div>
+                <div class="form-group">
+                  <label for="passworddd">密码：</label>
+                  <input type="password" name='password' class="form-control" id="id_password" placeholder="Password" required>
+                  <input type="hidden" value="{{ pub_key }}" id="pubkey">
+                </div>
+                
+                <div class="form-group">
+                  
+                <button type="submit" class="btn btn-primary float-right active " onclick="dologin();return false;" >登录</button>
+                </div>
+            </form>
+        
+            </div>
+    </div>
+    <div class="thunder-background"></div>
+
+
+   
+    <script src="https://cdn.bootcss.com/jquery/3.3.1/jquery.js"></script>
+    <script src="https://cdn.bootcss.com/popper.js/1.15.0/umd/popper.js"></script>
+    <script src="https://cdn.bootcss.com/twitter-bootstrap/4.3.1/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="/static/js/jsencrypt.min.js"></script>
+    <script>
+      function dologin() {
+              //公钥加密
+              var pwd =$('#id_password').val(); //明文密码
+              
+              var pubkey = $('#pubkey').val(); //公钥，pkcs#1格式，字符串
+              var jsencrypt = new JSEncrypt(); //加密对象
+              jsencrypt.setPublicKey(pubkey); // 设置密钥
+              var en_pwd = jsencrypt.encrypt(pwd); //加密
+              $('#id_password').val(en_pwd); //返回给密码输入input
+              cc=$('#id_password').val();
+              alert(cc);
+              $('.form-login').submit();//post提交
+          }
+      </script>
+    
+
+     
+  </body>
+  
+</html>
